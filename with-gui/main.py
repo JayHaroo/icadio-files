@@ -1,6 +1,10 @@
 import cv2
 import tkinter as tk
 from PIL import Image, ImageTk
+from gtts import gTTS
+import pygame
+import io
+from queue import Queue
 
 terminate_key = ord('q')  # Press 'q' to terminate the program
 
@@ -25,6 +29,10 @@ net.setInputScale(1.0 / 127.5)
 net.setInputMean((127.5, 127.5, 127.5))
 net.setInputSwapRB(True)
 
+# Initialize pygame for audio playback
+pygame.init()
+
+
 # Create Tkinter window
 root = tk.Tk()
 root.title("Icadio")
@@ -37,16 +45,41 @@ canvas_height = 600
 canvas = tk.Canvas(root, width=canvas_width, height=canvas_height)
 canvas.pack()
 
+# Function to speak the detected objects
+def speak():
+    while not detected_objects.empty():
+        object_name = detected_objects.get()
+        tts = gTTS(text=object_name, lang='en')
+        audio_buffer = io.BytesIO()
+        tts.write_to_fp(audio_buffer)
+        audio_buffer.seek(0)
+        pygame.mixer.music.load(audio_buffer)
+        pygame.mixer.music.play()
+        while pygame.mixer.music.get_busy():  # Wait until the audio finishes playing
+            pygame.time.Clock().tick(10)  # Adjust the argument according to your preference
+
+        pygame.mixer.music.wait()
+
+# Function to update the frame and detect objects
 def update_frame():
     success, img = cap.read()
     if success:
         classIds, confs, bbox = net.detect(img, confThreshold=thres)
-        
-        for classId, confidence, box in zip(classIds.flatten(), confs.flatten(), bbox):
-            cv2.rectangle(img, box, color=(0, 255, 0), thickness=2)
-            cv2.putText(img, classNames[classId - 1].upper(), (box[0] + 10, box[1] + 30),
-                        cv2.FONT_HERSHEY_COMPLEX, 1, (0, 255, 0), 2)
 
+        if len(classIds) > 0:  # Check if classIds is not empty
+            if isinstance(classIds, tuple):  # Check if classIds is a tuple
+                classIds = classIds[0]  # Unpack the tuple
+
+            for classId, confidence, box in zip(classIds, confs.flatten(), bbox):
+                object_name = classNames[classId - 1].upper()
+                detected_objects.put(object_name)
+
+                # Draw bounding box and label on the image
+                cv2.rectangle(img, box, color=(0, 255, 0), thickness=2)
+                cv2.putText(img, object_name, (box[0] + 10, box[1] + 30), cv2.FONT_HERSHEY_COMPLEX, 1, (0, 255, 0), 2)
+        else:
+            print("No objects detected in the frame")
+        
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         # Calculate scaling factor while maintaining aspect ratio
@@ -66,7 +99,9 @@ def update_frame():
 
     root.after(10, update_frame)
 
-Font_tuple = ("Arial",10, "bold") 
+# Function to handle Listen button click
+def listen_button_click():
+    speak()
 
 # Load the image
 button_img = Image.open("Listen.png")
@@ -88,14 +123,13 @@ label = tk.Label(root, image=button_img3)
 label_window = canvas.create_window((canvas_width/2)-45,0, anchor=tk.NW, window=label)
 
 # Add rounded rectangle button using Tkinter
-button = tk.Button(root, image=button_img, relief=tk.FLAT,height=50, width=125)
+button = tk.Button(root, image=button_img, relief=tk.FLAT, height=50, width=125, command=listen_button_click)
 button_window = canvas.create_window(30, 520, anchor=tk.NW, window=button)
 
-button2 = tk.Button(root, image=button_img2, relief=tk.FLAT,height= 50, width=50)
+button2 = tk.Button(root, image=button_img2, relief=tk.FLAT, height=50, width=50)
 button_window2 = canvas.create_window(190, 520, anchor=tk.NW, window=button2)
 
-button2.configure(font = Font_tuple)
- 
+detected_objects = Queue()
 update_frame()
 root.mainloop()
 
